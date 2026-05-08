@@ -1,6 +1,6 @@
 import userModel from "../models/user.model.js";
 import otpModel from "../models/otp.model.js";
-import { generateOTP, generateHTML } from "../utils/email.utils.js";
+import { generateOTP, generateHTML, generateHTMLForPassUpdation } from "../utils/email.utils.js";
 import sendEmail from "../services/email.service.js";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
@@ -34,7 +34,7 @@ export const registerController = async (req, res) => {
       password: hash,
     });
     const otp = generateOTP();
-    console.log(otp);
+
     const otpHash = crypto
       .createHash("sha256")
       .update(otp.toString())
@@ -192,37 +192,17 @@ export const login = async (req, res) => {
     });
   }
 };
+
 export const rotateTokens = async (req, res) => {
-  const token = req.cookies.token;
-  if (!token) {
-    return res.status(401).json({
-      message: "Unauthorized!",
-    });
-  }
   try {
-      const decoded = jwt.verify(token, config.JWT_SECRET);
-      
-    const refreshTokenHash = crypto
-      .createHash("sha256")
-      .update(token)
-          .digest("hex");
-      
-    const session = await sessionModel.findOne({
-      revoked: false,
-      refreshTokenHash,
-    });
-    if (!session) {
-      return res.status(400).json({
-        message: "unauthorized!,not a legit user",
-      });
-    }
+    const session = req.session;
+    const user = req.user;
 
-
-    const accessToken = jwt.sign({ id: decoded.id }, config.JWT_SECRET, {
+    const accessToken = jwt.sign({ id: user._id }, config.JWT_SECRET, {
       expiresIn: "15m",
     });
 
-    const refreshToken = jwt.sign({ id: decoded.id }, config.JWT_SECRET, {
+    const refreshToken = jwt.sign({ id: user._id }, config.JWT_SECRET, {
       expiresIn: "7d",
     });
 
@@ -230,6 +210,7 @@ export const rotateTokens = async (req, res) => {
 
     session.refreshTokenHash = hash;
     await session.save();
+
     res.cookie("token", refreshToken, {
       httpOnly: true,
       secure: true,
@@ -245,5 +226,247 @@ export const rotateTokens = async (req, res) => {
     return res.status(500).json({
       message: "Internal Server Error",
     });
+  }
+};
+
+export const logout = async (req, res) => {
+  try {
+    const session = req.session;
+
+    session.revoked = true;
+    await session.save();
+
+    res.clearCookie("token");
+
+    return res.status(200).json({
+      message: "User logged out successfully!",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server Error!",
+    });
+  }
+};
+
+export const logoutAll = async (req, res) => {
+  try {
+    const user = req.user;
+
+    await sessionModel.updateMany(
+      {
+        user: user._id,
+        revoked: false,
+      },
+      {
+        revoked: true,
+      },
+    );
+    res.clearCookie("token");
+    return res.status(200).json({
+      message: "User logged out from all devices!",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server Error",
+    });
+  }
+};
+
+export const resendOTP = async (req, res) => {
+  const { email } = req.body;
+  const user = await userModel.findOne({ email });
+  if (!user) {
+    return res.status(401).json({
+      message: "Unauthorized user",
+    });
+  }
+  const otps = await otpModel.deleteMany({
+    email,
+  });
+  const otp = generateOTP();
+
+  const otpHash = crypto
+    .createHash("sha256")
+    .update(otp.toString())
+    .digest("hex");
+
+  await otpModel.create({
+    otpHash,
+    email,
+  });
+
+  const html = generateHTML(otp);
+  await sendEmail(
+    email,
+    "Verification code",
+    "Enter this code to verify yourself",
+    html,
+  );
+  return res.status(201).json({
+    message: "Code sent successfully!",
+  });
+};
+
+export const updatePassword = async (req, res) => {
+  try {
+    const user = req.user;
+    const { email, oldPassword, newPassword } = req.body;
+    const userWithPassword = await userModel
+      .findById(user._id)
+      .select("+password");
+    console.log(userWithPassword);
+    const matches = await bcrypt.compare(oldPassword, userWithPassword.password);
+
+    if (!matches) {
+      return res.status(401).json({
+        message:"Incorrect Password!"
+      })
+    }
+
+    const hash =await bcrypt.hash(newPassword, 10);
+
+    userWithPassword.password = hash;
+    await userWithPassword.save();
+  
+    return res.status(200).json({
+      message: "Password updated successfully!",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server error!",
+    });
+  }
+};
+
+export const getMe = async (req, res) => {
+  try {
+    const user = req.user;
+    return res.status(200).json({
+      message: "User returned successfully!",
+      user
+    })
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server error"
+    })
+  }
+};
+
+export const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await userModel.findOne({ email });
+    if (!user) {
+      return res.status(401).json({
+        message:"unauthorized"
+      })
+    }
+    const otp = generateOTP();
+
+    const otpHash = crypto.createHash('sha256').update(otp.toString()).digest('hex');
+
+    await otpModel.create({
+      otpHash, email
+    })
+
+    const html = generateHTMLForPassUpdation(otp);
+
+    await sendEmail(email, 'Password updation code', 'code for updating password', html);
+
+    return res.status(201).json({
+      message: "Password verification code sent successfully!"
+    })
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server error"
+    })
+  }
+};
+
+export const verifyPassCode = async (req, res) => {
+  const { email, otp } = req.body;
+  if (!email || !otp) {
+    return res.status(400).json({
+      message: "Bad request, please give email and otp!"
+    })
+  }
+  const otpHash = crypto.createHash('sha256').update(otp.toString()).digest('hex');
+  const user = await userModel.findOne({ email });
+  const modelOtp = await otpModel.findOne({
+    email, otpHash
+  })
+  if (!modelOtp) {
+    return res.status(401).json({
+      message: "Unauthorized user!"
+    })
+  }
+  await otpModel.deleteById({
+    _id:modelOtp._id
+  })
+  const resetToken = await jwt.sign({
+    id: user._id
+  }, config.JWT_SECRET, {
+    expiresIn: "15m"
+  })
+  return res.status(200).json({
+    message: "code verified successfully!", resetToken
+  })
+};
+
+export const changePassword = async (req, res) => {
+  try {
+    const us = req.user;
+    const user = await userModel.findById(us._id);
+
+    const { newPassword, confirmPassword } = req.body;
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        message: "Passwords must match"
+      })
+    }
+    const hash = await bcrypt.hash(newPassword, 10);
+   
+    user.password = hash;
+    await user.save();
+
+    return res.status(200).json({
+      message: "Password updated successfully!"
+    })
+    
+  } catch (err) {
+    return res.status(500).json({
+      message: "Internal Server error!"
+    })
+  }
+};
+
+export const resendPasswordOTP = async (req, res) => {
+  const { email } = req.body;
+  try {
+    const user = await userModel.findOne({ email });
+    if (!user) {
+      return res.status(400).json({
+        message: "user Unauthenticated"
+      });
+    }
+    await otpModel.deleteMany({ email });
+    const otp = generateOTP();
+    const otpHash = crypto.createHash('sha256').update(otp.toString()).digest('hex');
+
+    const otps = await otpModel.create({
+      otpHash,email
+    })
+    const html = generateHTMLForPassUpdation(otp);
+
+    await sendEmail(email, 'Password updation code', 'code for verifying yourself', html);
+
+    return res.status(201).json({
+      message:"Password updation code sent successfully!"
+    })
+  } catch (err) {
+    return res.status(500).json({
+      message:"Internal Server error"
+    })
   }
 };
