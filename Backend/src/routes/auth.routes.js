@@ -37,7 +37,7 @@ authRouter.post('/login',authLimiter,validate(loginSchema), authController.login
  * @description generates new access token and refresh token
  * @access private
  */
-authRouter.patch('/refreshToken', authController.rotateTokens);
+authRouter.patch('/refreshToken',sessionMiddleware, authController.rotateTokens);
 
 /**
  * @route /api/auth/logout
