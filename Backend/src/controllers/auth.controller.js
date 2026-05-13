@@ -8,7 +8,7 @@ import jwt from "jsonwebtoken";
 import sessionModel from "../models/session.model.js";
 import config from "../config/config.js";
 
-export const registerController = async (req, res) => {
+export const registerController = async (req, res,next) => {
   const { username, email, password } = req.body;
   if (!username || !email || !password) {
     return res.status(400).json({
@@ -40,10 +40,11 @@ export const registerController = async (req, res) => {
       .update(otp.toString())
       .digest("hex");
 
-    await otpModel.create({
+    const otpStored=await otpModel.create({
       otpHash,
       email,
     });
+    console.log(otpStored);
 
     const html = generateHTML(otp);
 
@@ -64,13 +65,11 @@ export const registerController = async (req, res) => {
       },
     });
   } catch (err) {
-    return res.status(500).json({
-      message: "Internal Server error",
-    });
+    next(err);
   }
 };
 
-export const verifyCode = async (req, res) => {
+export const verifyCode = async (req, res,next) => {
   const { otp, email } = req.body;
   if (!otp) {
     return res.status(400).json({
@@ -110,13 +109,11 @@ export const verifyCode = async (req, res) => {
       },
     });
   } catch (err) {
-    return res.status(500).json({
-      message: "Internal Server error",
-    });
+    next(err);
   }
 };
 
-export const login = async (req, res) => {
+export const login = async (req, res,next) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -187,13 +184,11 @@ export const login = async (req, res) => {
       accessToken,
     });
   } catch (err) {
-    return res.status(500).json({
-      message: "Internal Server error!",
-    });
+    next(err);
   }
 };
 
-export const rotateTokens = async (req, res) => {
+export const rotateTokens = async (req, res,next) => {
   try {
     const session = req.session;
     const user = req.user;
@@ -223,13 +218,11 @@ export const rotateTokens = async (req, res) => {
       accessToken,
     });
   } catch (err) {
-    return res.status(500).json({
-      message: "Internal Server Error",
-    });
+    next(err);
   }
 };
 
-export const logout = async (req, res) => {
+export const logout = async (req, res,next) => {
   try {
     const session = req.session;
 
@@ -242,13 +235,11 @@ export const logout = async (req, res) => {
       message: "User logged out successfully!",
     });
   } catch (err) {
-    return res.status(500).json({
-      message: "Internal Server Error!",
-    });
+    next(err);
   }
 };
 
-export const logoutAll = async (req, res) => {
+export const logoutAll = async (req, res,next) => {
   try {
     const user = req.user;
 
@@ -266,48 +257,51 @@ export const logoutAll = async (req, res) => {
       message: "User logged out from all devices!",
     });
   } catch (err) {
-    return res.status(500).json({
-      message: "Internal Server Error",
-    });
+    next(err);
   }
 };
 
-export const resendOTP = async (req, res) => {
-  const { email } = req.body;
-  const user = await userModel.findOne({ email });
-  if (!user) {
-    return res.status(401).json({
-      message: "Unauthorized user",
+export const resendOTP = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const user = await userModel.findOne({ email });
+    if (!user) {
+      return res.status(401).json({
+        message: "Unauthorized user",
+      });
+    }
+    const otps = await otpModel.deleteMany({
+      email,
+    });
+    const otp = generateOTP();
+
+    const otpHash = crypto
+      .createHash("sha256")
+      .update(otp.toString())
+      .digest("hex");
+
+    await otpModel.create({
+      otpHash,
+      email,
+    });
+
+    const html = generateHTML(otp);
+    await sendEmail(
+      email,
+      "Verification code",
+      "Enter this code to verify yourself",
+      html,
+    );
+    return res.status(201).json({
+      message: "Code sent successfully!",
     });
   }
-  const otps = await otpModel.deleteMany({
-    email,
-  });
-  const otp = generateOTP();
-
-  const otpHash = crypto
-    .createHash("sha256")
-    .update(otp.toString())
-    .digest("hex");
-
-  await otpModel.create({
-    otpHash,
-    email,
-  });
-
-  const html = generateHTML(otp);
-  await sendEmail(
-    email,
-    "Verification code",
-    "Enter this code to verify yourself",
-    html,
-  );
-  return res.status(201).json({
-    message: "Code sent successfully!",
-  });
+  catch (err) {
+    next(err);
+  }
 };
 
-export const updatePassword = async (req, res) => {
+export const updatePassword = async (req, res,next) => {
   try {
     const user = req.user;
     const { email, oldPassword, newPassword } = req.body;
@@ -332,13 +326,11 @@ export const updatePassword = async (req, res) => {
       message: "Password updated successfully!",
     });
   } catch (err) {
-    return res.status(500).json({
-      message: "Internal Server error!",
-    });
+    next(err);
   }
 };
 
-export const getMe = async (req, res) => {
+export const getMe = async (req, res,next) => {
   try {
     const user = req.user;
     return res.status(200).json({
@@ -346,13 +338,11 @@ export const getMe = async (req, res) => {
       user
     })
   } catch (err) {
-    return res.status(500).json({
-      message: "Internal Server error"
-    })
+    next(err);
   }
 };
 
-export const forgotPassword = async (req, res) => {
+export const forgotPassword = async (req, res,next) => {
   const { email } = req.body;
 
   try {
@@ -378,43 +368,46 @@ export const forgotPassword = async (req, res) => {
       message: "Password verification code sent successfully!"
     })
   } catch (err) {
-    return res.status(500).json({
-      message: "Internal Server error"
-    })
+    next(err);
   }
 };
 
-export const verifyPassCode = async (req, res) => {
+export const verifyPassCode = async (req, res,next) => {
   const { email, otp } = req.body;
-  if (!email || !otp) {
-    return res.status(400).json({
-      message: "Bad request, please give email and otp!"
+  try {
+    if (!email || !otp) {
+      return res.status(400).json({
+        message: "Bad request, please give email and otp!"
+      })
+    }
+    const otpHash = crypto.createHash('sha256').update(otp.toString()).digest('hex');
+    const user = await userModel.findOne({ email });
+    const modelOtp = await otpModel.findOne({
+      email, otpHash
+    })
+    if (!modelOtp) {
+      return res.status(401).json({
+        message: "Unauthorized user!"
+      })
+    }
+    await otpModel.deleteById({
+      _id: modelOtp._id
+    })
+    const resetToken = await jwt.sign({
+      id: user._id
+    }, config.JWT_SECRET, {
+      expiresIn: "15m"
+    })
+    return res.status(200).json({
+      message: "code verified successfully!", resetToken
     })
   }
-  const otpHash = crypto.createHash('sha256').update(otp.toString()).digest('hex');
-  const user = await userModel.findOne({ email });
-  const modelOtp = await otpModel.findOne({
-    email, otpHash
-  })
-  if (!modelOtp) {
-    return res.status(401).json({
-      message: "Unauthorized user!"
-    })
+  catch (err) {
+    next(err);
   }
-  await otpModel.deleteById({
-    _id:modelOtp._id
-  })
-  const resetToken = await jwt.sign({
-    id: user._id
-  }, config.JWT_SECRET, {
-    expiresIn: "15m"
-  })
-  return res.status(200).json({
-    message: "code verified successfully!", resetToken
-  })
 };
 
-export const changePassword = async (req, res) => {
+export const changePassword = async (req, res,next) => {
   try {
     const us = req.user;
     const user = await userModel.findById(us._id);
@@ -435,13 +428,11 @@ export const changePassword = async (req, res) => {
     })
     
   } catch (err) {
-    return res.status(500).json({
-      message: "Internal Server error!"
-    })
+    next(err);
   }
 };
 
-export const resendPasswordOTP = async (req, res) => {
+export const resendPasswordOTP = async (req, res,next) => {
   const { email } = req.body;
   try {
     const user = await userModel.findOne({ email });
@@ -465,8 +456,6 @@ export const resendPasswordOTP = async (req, res) => {
       message:"Password updation code sent successfully!"
     })
   } catch (err) {
-    return res.status(500).json({
-      message:"Internal Server error"
-    })
+    next(err);
   }
 };
