@@ -1,6 +1,7 @@
 import documentModel from "../models/document.model.js";
 import userModel from "../models/user.model.js";
 import { documentAccess,ownerDocumentAccess } from "../utils/document.utils.js";
+import revisionModel from "../models/revision.model.js";
 
 export const createDocument =async (req, res,next) => {
     const user = req.user;
@@ -58,6 +59,13 @@ export const updateDoc = async (req, res,next) => {
     try {
         const { title, content } = req.body;
         const doc = req.doc;
+        const user = req.user;
+        const revision = await revisionModel.create({
+            document: doc._id,
+            editedBy: user._id,
+            content: doc.content
+        });
+        console.log(revision);
         if (title) {
             doc.title = title;    
         }
@@ -199,5 +207,90 @@ export const removeCollaborator = async (req, res,next) => {
         })
     } catch (err) {
         next(err);
+    }
+}
+
+export const fetchRevisions = async (req, res, next) => {
+    try {
+        const user = req.user;
+        const { id } = req.params;
+
+        const revisions = await revisionModel.find({
+            document: id,
+        })
+        if (revisions.length === 0) {
+            return res.status(200).json({
+                message:"revisions exist for this particular document"
+            })
+        }
+        return res.status(200).json({
+            message: 'All revisions fetched successfully!',
+            revisions
+        })
+    } catch (err) {
+        next(err); 
+    }
+}
+
+export const restoreRevisions = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        const user = req.user;
+        const revision = await revisionModel.findOne({
+            document: id,
+        }).sort({
+            createdAt:-1
+        })
+        if (!revision) {
+            return res.status(400).json({
+                message:"Revision not found!"
+            })
+        }
+
+        const doc = await documentModel.findOne({
+            _id: id,
+            owner:user._id
+        })
+
+        if (!doc) {
+            return res.status(404).json({
+                message:'Document not found'
+            })
+        }
+        doc.content = revision.content;
+        await doc.save();
+
+        return res.status(200).json({
+            message: "Document restored to it's previous state",
+            doc
+        })
+    } catch (err) {
+        next(err);
+    }
+}
+
+export const updateRole = async (req, res, next) => {
+    const { role } = req.body;
+    const user = req.user;
+    const { id, userId } = req.params;
+    try {
+        const doc = await ownerDocumentAccess(id, user._id);
+        if (!doc) {
+            return res.status(404).json({
+                message:"Document do not exist."
+            })
+        }
+        const collab=doc.collaborators.find((item) => {
+            return item.user.equals(userId)
+        })
+        collab.role = role;
+        await doc.save();
+        return res.status(200).json({
+            message: "Role updated successfully!",
+            doc
+        })
+
+    } catch (err) {
+        next(err)
     }
 }

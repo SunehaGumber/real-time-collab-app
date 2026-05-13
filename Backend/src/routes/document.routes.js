@@ -55,4 +55,25 @@ documentRouter.patch('/:id/addCollaborator', authMiddleware, validate(addCollabS
  */
 documentRouter.patch('/:id/removeCollaborator/:userId', authMiddleware, documentController.removeCollaborator);
 
+/**
+ * @route /api/document/:id/revision
+ * @description it fetches all the revisions
+ * @access Private
+ */
+documentRouter.get('/:id/revisions', authMiddleware, documentController.fetchRevisions);
+
+/**
+ * @route /api/document/:id/restore
+ * @description it restores the document to it's previous state.
+ * @access Private
+ */
+documentRouter.patch('/:id/restore', authMiddleware, documentController.restoreRevisions);
+
+/**
+ * @route /api/document/:id/updateRole/:userId
+ * @description updates role of collaborator
+ * @access Private
+ */
+documentRouter.patch('/:id/updateRole/:userId', authMiddleware, documentController.updateRole);
+
 export default documentRouter;
